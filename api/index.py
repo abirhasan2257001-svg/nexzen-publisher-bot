@@ -89,6 +89,23 @@ def handle_update(update):
             USER_STATES[chat_id] = {"type": "PROMPT", "step": "MEDIA", "media": []}
             keyboard = {"inline_keyboard": [[{"text": "✅ Done Uploading Media", "callback_data": "media_done"}]]}
             send_message(chat_id, "<b>Prompt Mode Selected</b>\nSend images/videos. Click Done when finished.", keyboard)
+        elif data == "type_raw":
+            USER_STATES[chat_id] = {"type": "RAW", "step": "MEDIA"}
+            send_message(chat_id, "<b>Raw File Mode Selected</b>\nStep 1: Send Cover Photo or Video for the post.")
+        elif data == "btn_no":
+            state = USER_STATES.get(chat_id)
+            if state and state.get("type") == "RAW" and state.get("step") == "ASK_CUSTOM":
+                state["pending_file"]["custom_name"] = None
+                state["files"].append(state["pending_file"])
+                state["pending_file"] = None
+                state["step"] = "FILES"
+                keyboard = {"inline_keyboard": [[{"text": "✅ Done Uploading Files", "callback_data": "raw_files_done"}]]}
+                send_message(chat_id, f"Added file with default button title. Send next file or click Done.", keyboard)
+        elif data == "btn_yes":
+            state = USER_STATES.get(chat_id)
+            if state and state.get("type") == "RAW" and state.get("step") == "ASK_CUSTOM":
+                state["step"] = "ENTER_CUSTOM"
+                send_message(chat_id, "Enter the custom button title for this file:")
         elif data == "media_done":
             state = USER_STATES.get(chat_id)
             if state and state.get("type") == "PROMPT" and state.get("step") == "MEDIA":
@@ -97,6 +114,53 @@ def handle_update(update):
                     return
                 state["step"] = "CAPTION"
                 send_message(chat_id, "Next Step: Send Caption for post.")
+        elif data == "raw_files_done":
+            state = USER_STATES.get(chat_id)
+            if state and state.get("type") == "RAW":
+                if not state.get("files"):
+                    send_message(chat_id, "⚠️ Send at least one file/document!")
+                    return
+                
+                # Publish RAW Post
+                buttons = []
+                for f in state["files"]:
+                    doc_payload = {
+                        "chat_id": STORAGE_CHANNEL_ID,
+                        "document": f["file_id"],
+                        "caption": f"<b>{f['file_name']}</b>",
+                        "parse_mode": "HTML"
+                    }
+                    doc_res = requests.post(f"{TELEGRAM_API}/sendDocument", json=doc_payload).json()
+                    storage_msg_id = doc_res["result"]["message_id"]
+                    deep_link = f"https://t.me/{BOT_USERNAME}?start=msg_{storage_msg_id}"
+                    
+                    if f.get("custom_name"):
+                        btn_title = f["custom_name"]
+                    else:
+                        ext = f['file_name'].split('.')[-1].upper() if '.' in f['file_name'] else 'FILE'
+                        icon = "📄"
+                        if ext in ["PDF"]: icon = "📕"
+                        elif ext in ["HTML", "HTM"]: icon = "🌐"
+                        elif ext in ["ZIP", "RAR", "7Z"]: icon = "📦"
+                        elif ext in ["APK"]: icon = "📱"
+                        elif ext in ["PY", "JS", "TXT"]: icon = "📝"
+                        btn_title = f"{icon} Download {ext} ({f['file_name']})"
+                    
+                    buttons.append([{"text": btn_title, "url": deep_link}])
+
+                keyboard = {"inline_keyboard": buttons}
+                caption_text = f"{state['caption']}\n\n⬇️ <b>OFFICIAL DOWNLOADS</b> ⬇️"
+
+                media_type = state["media_type"]
+                media_id = state["media"]
+
+                if media_type == "photo":
+                    requests.post(f"{TELEGRAM_API}/sendPhoto", json={"chat_id": PUBLIC_CHANNEL_ID, "photo": media_id, "caption": caption_text, "parse_mode": "HTML", "reply_markup": json.dumps(keyboard)})
+                else:
+                    requests.post(f"{TELEGRAM_API}/sendVideo", json={"chat_id": PUBLIC_CHANNEL_ID, "video": media_id, "caption": caption_text, "parse_mode": "HTML", "reply_markup": json.dumps(keyboard)})
+
+                send_message(chat_id, "✅ Raw File post published successfully!")
+                USER_STATES.pop(chat_id, None)
         return
 
     if "message" not in update:
@@ -124,7 +188,7 @@ def handle_update(update):
             param = args[1]
             if param.startswith("msg_"):
                 msg_id = int(param.replace("msg_", ""))
-                n_msg = send_message(chat_id, "📦 <b>Here is your file!</b> (Auto-deletes in 60s)")
+                send_message(chat_id, "📦 <b>Here is your file!</b> (Auto-deletes in 60s)")
                 res = copy_message(chat_id, STORAGE_CHANNEL_ID, msg_id)
                 if res.get("ok"):
                     file_msg_id = res["result"]["message_id"]
@@ -132,7 +196,7 @@ def handle_update(update):
                 return
             elif param.startswith("prompt_"):
                 prompt_msg_id = int(param.replace("prompt_", ""))
-                n_msg = send_message(chat_id, "✨ <b>Here is your Prompt!</b> (Auto-deletes in 60s)")
+                send_message(chat_id, "✨ <b>Here is your Prompt!</b> (Auto-deletes in 60s)")
                 res = copy_message(chat_id, STORAGE_CHANNEL_ID, prompt_msg_id)
                 if res.get("ok"):
                     file_msg_id = res["result"]["message_id"]
@@ -177,7 +241,8 @@ def handle_update(update):
         keyboard = {
             "inline_keyboard": [
                 [{"text": "📱 Publish App", "callback_data": "type_app"}],
-                [{"text": "🎬 Publish Prompt & Media", "callback_data": "type_prompt"}]
+                [{"text": "🎬 Publish Prompt & Media", "callback_data": "type_prompt"}],
+                [{"text": "📁 Publish Raw / Custom Files", "callback_data": "type_raw"}]
             ]
         }
         send_message(chat_id, "What type of post do you want to create?", keyboard)
@@ -189,7 +254,57 @@ def handle_update(update):
     post_type = state.get("type")
     current_step = state.get("step")
 
-    if post_type == "APP":
+    # --- RAW MODE FLOW ---
+    if post_type == "RAW":
+        if current_step == "MEDIA":
+            if "photo" in message:
+                state["media"] = message["photo"][-1]["file_id"]
+                state["media_type"] = "photo"
+            elif "video" in message:
+                state["media"] = message["video"]["file_id"]
+                state["media_type"] = "video"
+            else:
+                send_message(chat_id, "Please send a valid Photo or Video.")
+                return
+
+            state["step"] = "CAPTION"
+            send_message(chat_id, "Step 2: Send the Caption/Description for the post.")
+
+        elif current_step == "CAPTION":
+            state["caption"] = text
+            state["step"] = "FILES"
+            state["files"] = []
+            keyboard = {"inline_keyboard": [[{"text": "✅ Done Uploading Files", "callback_data": "raw_files_done"}]]}
+            send_message(chat_id, "Step 3: Send your files/documents one by one.", keyboard)
+
+        elif current_step == "FILES":
+            if "document" in message:
+                doc = message["document"]
+                state["pending_file"] = {
+                    "file_id": doc["file_id"],
+                    "file_name": doc.get("file_name", "File")
+                }
+                state["step"] = "ASK_CUSTOM"
+                keyboard = {
+                    "inline_keyboard": [
+                        [{"text": "✏️ Yes (Set Custom Title)", "callback_data": "btn_yes"}],
+                        [{"text": "❌ No (Use Default Title)", "callback_data": "btn_no"}]
+                    ]
+                }
+                send_message(chat_id, f"File received: <b>{doc.get('file_name')}</b>\nDo you want to set a custom title for this button?", keyboard)
+            else:
+                send_message(chat_id, "Please upload a valid Document / File.")
+
+        elif current_step == "ENTER_CUSTOM":
+            state["pending_file"]["custom_name"] = text
+            state["files"].append(state["pending_file"])
+            state["pending_file"] = None
+            state["step"] = "FILES"
+            keyboard = {"inline_keyboard": [[{"text": "✅ Done Uploading Files", "callback_data": "raw_files_done"}]]}
+            send_message(chat_id, f"Custom name saved! Send next file or click <b>Done Uploading Files</b>.", keyboard)
+
+    # --- APP FLOW ---
+    elif post_type == "APP":
         if current_step == "PHOTO":
             if "photo" in message:
                 state["photo"] = message["photo"][-1]["file_id"]
@@ -226,6 +341,7 @@ def handle_update(update):
             send_message(chat_id, "✅ App post published!")
             USER_STATES.pop(chat_id, None)
 
+    # --- PROMPT FLOW ---
     elif post_type == "PROMPT":
         if current_step == "MEDIA":
             if "photo" in message:
