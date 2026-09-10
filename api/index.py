@@ -1,120 +1,132 @@
 import os
 import json
 from http.server import BaseHTTPRequestHandler
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import (
-    ApplicationBuilder, CommandHandler, MessageHandler, 
-    ConversationHandler, ContextTypes, filters
-)
+import requests
 
 TOKEN = os.getenv("BOT_TOKEN")
 BOT_USERNAME = "NexzenLabsPublisherBot"
 CHANNEL_ID = "@NexzenLabs"
+TELEGRAM_API = f"https://api.telegram.org/bot{TOKEN}"
 
-PHOTO, APP_NAME, VERSION, INFO, FILE, GITHUB = range(6)
+USER_STATES = {}
 
-async def process_update(update_json):
-    app = ApplicationBuilder().token(TOKEN).build()
+def send_message(chat_id, text, reply_markup=None):
+    payload = {"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
+    if reply_markup:
+        payload["reply_markup"] = json.dumps(reply_markup)
+    requests.post(f"{TELEGRAM_API}/sendMessage", json=payload)
 
-    async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        await update.message.reply_text("Hello Owner! Send /create to start making a post.")
+def send_photo_to_channel(chat_id, photo_id, caption, reply_markup):
+    payload = {
+        "chat_id": chat_id,
+        "photo": photo_id,
+        "caption": caption,
+        "parse_mode": "HTML",
+        "reply_markup": json.dumps(reply_markup)
+    }
+    requests.post(f"{TELEGRAM_API}/sendPhoto", json=payload)
 
-    async def create_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        await update.message.reply_text("Step 1: Send the Cover Photo for the post.")
-        return PHOTO
+def handle_update(update):
+    if "message" not in update:
+        return
 
-    async def get_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        context.user_data['photo'] = update.message.photo[-1].file_id
-        await update.message.reply_text("Step 2: Enter App Name (e.g., Besura):")
-        return APP_NAME
+    message = update["message"]
+    chat_id = message["chat"]["id"]
+    text = message.get("text", "")
 
-    async def get_app_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        context.user_data['app_name'] = update.message.text
-        await update.message.reply_text("Step 3: Enter App Version (e.g., v1.0):")
-        return VERSION
+    if text == "/start":
+        USER_STATES.pop(chat_id, None)
+        send_message(chat_id, "Hello Owner! Send /create to start making a post.")
+        return
 
-    async def get_version(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        context.user_data['version'] = update.message.text
-        await update.message.reply_text("Step 4: Enter App Features / Info (each feature in a new line):")
-        return INFO
+    if text == "/cancel":
+        USER_STATES.pop(chat_id, None)
+        send_message(chat_id, "Process cancelled.")
+        return
 
-    async def get_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        raw_info = update.message.text.split('\n')
+    if text == "/create":
+        USER_STATES[chat_id] = {"step": "PHOTO"}
+        send_message(chat_id, "Step 1: Send the Cover Photo for the post.")
+        return
+
+    state = USER_STATES.get(chat_id)
+    if not state:
+        send_message(chat_id, "Please send /create to start generating a post.")
+        return
+
+    current_step = state.get("step")
+
+    if current_step == "PHOTO":
+        if "photo" in message:
+            photo_id = message["photo"][-1]["file_id"]
+            state["photo"] = photo_id
+            state["step"] = "APP_NAME"
+            send_message(chat_id, "Step 2: Enter App Name (e.g., Besura):")
+        else:
+            send_message(chat_id, "Please send a valid photo.")
+
+    elif current_step == "APP_NAME":
+        state["app_name"] = text
+        state["step"] = "VERSION"
+        send_message(chat_id, "Step 3: Enter App Version (e.g., v1.0):")
+
+    elif current_step == "VERSION":
+        state["version"] = text
+        state["step"] = "INFO"
+        send_message(chat_id, "Step 4: Enter App Features / Info (each feature in a new line):")
+
+    elif current_step == "INFO":
+        raw_info = text.split('\n')
         formatted_info = "\n".join([f"• {item.strip()}" for item in raw_info if item.strip()])
-        context.user_data['info'] = formatted_info
-        await update.message.reply_text("Step 5: Send or Upload the APK file now:")
-        return FILE
+        state["info"] = formatted_info
+        state["step"] = "FILE"
+        send_message(chat_id, "Step 5: Send or Upload the APK file now:")
 
-    async def get_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        file_id = update.message.document.file_id
-        context.user_data['file_id'] = file_id
-        await update.message.reply_text("Step 6: Send the GitHub link:")
-        return GITHUB
+    elif current_step == "FILE":
+        if "document" in message:
+            state["file_id"] = message["document"]["file_id"]
+            state["step"] = "GITHUB"
+            send_message(chat_id, "Step 6: Send the GitHub link:")
+        else:
+            send_message(chat_id, "Please send/upload the APK file (as document).")
 
-    async def get_github(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        github_link = update.message.text
-        app_name = context.user_data['app_name']
-        version = context.user_data['version']
-        
+    elif current_step == "GITHUB":
+        github_link = text
+        app_name = state["app_name"]
+        version = state["version"]
+        photo_id = state["photo"]
+        info_text = state["info"]
+
         caption_text = (
             f"⬛ <b>NEXZEN LABS</b> ⬜ presents\n"
             f"<b>{app_name} {version}</b> ✅\n\n"
             f"<blockquote expandable>📦 <b>App Info</b>\n\n"
-            f"{context.user_data['info']}</blockquote>\n\n"
+            f"{info_text}</blockquote>\n\n"
             f"⬇️ <b>OFFICIAL DOWNLOAD</b> ⬇️"
         )
-        
+
         bot_deep_link = f"https://t.me/{BOT_USERNAME}"
-        
-        keyboard = [
-            [InlineKeyboardButton("⬇️ Direct Download", url=bot_deep_link)],
-            [InlineKeyboardButton("⚡ GitHub Download", url=github_link)]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await context.bot.send_photo(
-            chat_id=CHANNEL_ID,
-            photo=context.user_data['photo'],
-            caption=caption_text,
-            parse_mode="HTML",
-            reply_markup=reply_markup
-        )
-        
-        await update.message.reply_text("✅ Successfully posted to your channel!")
-        return ConversationHandler.END
+        keyboard = {
+            "inline_keyboard": [
+                [{"text": "⬇️ Direct Download", "url": bot_deep_link}],
+                [{"text": "⚡ GitHub Download", "url": github_link}]
+            ]
+        }
 
-    async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        await update.message.reply_text("Process cancelled.")
-        return ConversationHandler.END
-
-    conv_handler = ConversationHandler(
-        entry_points=[CommandHandler('create', create_post)],
-        states={
-            PHOTO: [MessageHandler(filters.PHOTO, get_photo)],
-            APP_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_app_name)],
-            VERSION: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_version)],
-            INFO: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_info)],
-            FILE: [MessageHandler(filters.Document.ALL, get_file)],
-            GITHUB: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_github)],
-        },
-        fallbacks=[CommandHandler('cancel', cancel)]
-    )
-
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(conv_handler)
-
-    await app.initialize()
-    update = Update.de_json(update_json, app.bot)
-    await app.process_update(update)
+        send_photo_to_channel(CHANNEL_ID, photo_id, caption_text, keyboard)
+        send_message(chat_id, "✅ Successfully posted to your channel!")
+        USER_STATES.pop(chat_id, None)
 
 class handler(BaseHTTPRequestHandler):
     def do_POST(self):
         content_length = int(self.headers['Content-Length'])
         post_data = self.rfile.read(content_length)
-        update_json = json.loads(post_data.decode('utf-8'))
+        update = json.loads(post_data.decode('utf-8'))
 
-        import asyncio
-        asyncio.run(process_update(update_json))
+        try:
+            handle_update(update)
+        except Exception as e:
+            print("Error:", e)
 
         self.send_response(200)
         self.send_header('Content-type', 'text/plain')
