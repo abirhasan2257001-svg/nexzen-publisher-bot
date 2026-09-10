@@ -16,9 +16,16 @@ def send_message(chat_id, text, reply_markup=None):
         payload["reply_markup"] = json.dumps(reply_markup)
     requests.post(f"{TELEGRAM_API}/sendMessage", json=payload)
 
-def send_photo_to_channel(chat_id, photo_id, caption, reply_markup):
+def send_document(chat_id, document_id, caption=None):
+    payload = {"chat_id": chat_id, "document": document_id}
+    if caption:
+        payload["caption"] = caption
+        payload["parse_mode"] = "HTML"
+    requests.post(f"{TELEGRAM_API}/sendDocument", json=payload)
+
+def send_photo_to_channel(channel_id, photo_id, caption, reply_markup):
     payload = {
-        "chat_id": chat_id,
+        "chat_id": channel_id,
         "photo": photo_id,
         "caption": caption,
         "parse_mode": "HTML",
@@ -34,7 +41,15 @@ def handle_update(update):
     chat_id = message["chat"]["id"]
     text = message.get("text", "")
 
-    if text == "/start":
+    # Handle /start or Deep Link when clicking Direct Download
+    if text.startswith("/start"):
+        args = text.split(" ")
+        if len(args) > 1 and args[1].startswith("file_"):
+            # Extract file_id from deep link parameter
+            file_id = args[1].replace("file_", "")
+            send_document(chat_id, file_id, caption="Here is your requested APK file! 📦")
+            return
+        
         USER_STATES.pop(chat_id, None)
         send_message(chat_id, "Hello Owner! Send /create to start making a post.")
         return
@@ -95,6 +110,7 @@ def handle_update(update):
         app_name = state["app_name"]
         version = state["version"]
         photo_id = state["photo"]
+        file_id = state["file_id"]
         info_text = state["info"]
 
         caption_text = (
@@ -105,7 +121,9 @@ def handle_update(update):
             f"⬇️ <b>OFFICIAL DOWNLOAD</b> ⬇️"
         )
 
-        bot_deep_link = f"https://t.me/{BOT_USERNAME}"
+        # Deep link attached directly with Telegram File ID
+        bot_deep_link = f"https://t.me/{BOT_USERNAME}?start=file_{file_id}"
+        
         keyboard = {
             "inline_keyboard": [
                 [{"text": "⬇️ Direct Download", "url": bot_deep_link}],
@@ -114,7 +132,7 @@ def handle_update(update):
         }
 
         send_photo_to_channel(CHANNEL_ID, photo_id, caption_text, keyboard)
-        send_message(chat_id, "✅ Successfully posted to your channel!")
+        send_message(chat_id, "✅ Successfully posted to your channel! Direct download for APK is now functional.")
         USER_STATES.pop(chat_id, None)
 
 class handler(BaseHTTPRequestHandler):
