@@ -4,7 +4,6 @@ from http.server import BaseHTTPRequestHandler
 import requests
 
 TOKEN = os.getenv("BOT_TOKEN")
-BOT_USERNAME = "NexzenLabsPublisherBot"
 CHANNEL_ID = "@NexzenLabs"
 TELEGRAM_API = f"https://api.telegram.org/bot{TOKEN}"
 
@@ -16,23 +15,6 @@ def send_message(chat_id, text, reply_markup=None):
         payload["reply_markup"] = json.dumps(reply_markup)
     requests.post(f"{TELEGRAM_API}/sendMessage", json=payload)
 
-def send_document(chat_id, document_id, caption=None):
-    payload = {"chat_id": chat_id, "document": document_id}
-    if caption:
-        payload["caption"] = caption
-        payload["parse_mode"] = "HTML"
-    requests.post(f"{TELEGRAM_API}/sendDocument", json=payload)
-
-def send_photo_to_channel(channel_id, photo_id, caption, reply_markup):
-    payload = {
-        "chat_id": channel_id,
-        "photo": photo_id,
-        "caption": caption,
-        "parse_mode": "HTML",
-        "reply_markup": json.dumps(reply_markup)
-    }
-    requests.post(f"{TELEGRAM_API}/sendPhoto", json=payload)
-
 def handle_update(update):
     if "message" not in update:
         return
@@ -41,15 +23,7 @@ def handle_update(update):
     chat_id = message["chat"]["id"]
     text = message.get("text", "")
 
-    # Handle /start or Deep Link when clicking Direct Download
-    if text.startswith("/start"):
-        args = text.split(" ")
-        if len(args) > 1 and args[1].startswith("file_"):
-            # Extract file_id from deep link parameter
-            file_id = args[1].replace("file_", "")
-            send_document(chat_id, file_id, caption="Here is your requested APK file! 📦")
-            return
-        
+    if text == "/start":
         USER_STATES.pop(chat_id, None)
         send_message(chat_id, "Hello Owner! Send /create to start making a post.")
         return
@@ -113,6 +87,24 @@ def handle_update(update):
         file_id = state["file_id"]
         info_text = state["info"]
 
+        # Step A: Send the Document/APK to channel first
+        doc_payload = {
+            "chat_id": CHANNEL_ID,
+            "document": file_id,
+            "caption": f"📦 <b>{app_name} {version} APK File</b>",
+            "parse_mode": "HTML"
+        }
+        doc_res = requests.post(f"{TELEGRAM_API}/sendDocument", json=doc_payload).json()
+
+        # Get direct message link inside Telegram channel
+        clean_channel = CHANNEL_ID.replace("@", "")
+        if doc_res.get("ok"):
+            msg_id = doc_res["result"]["message_id"]
+            file_link = f"https://t.me/{clean_channel}/{msg_id}"
+        else:
+            file_link = github_link
+
+        # Step B: Send the photo post with Direct Download pointing directly to the channel file
         caption_text = (
             f"⬛ <b>NEXZEN LABS</b> ⬜ presents\n"
             f"<b>{app_name} {version}</b> ✅\n\n"
@@ -121,18 +113,23 @@ def handle_update(update):
             f"⬇️ <b>OFFICIAL DOWNLOAD</b> ⬇️"
         )
 
-        # Deep link attached directly with Telegram File ID
-        bot_deep_link = f"https://t.me/{BOT_USERNAME}?start=file_{file_id}"
-        
         keyboard = {
             "inline_keyboard": [
-                [{"text": "⬇️ Direct Download", "url": bot_deep_link}],
+                [{"text": "⬇️ Direct Download", "url": file_link}],
                 [{"text": "⚡ GitHub Download", "url": github_link}]
             ]
         }
 
-        send_photo_to_channel(CHANNEL_ID, photo_id, caption_text, keyboard)
-        send_message(chat_id, "✅ Successfully posted to your channel! Direct download for APK is now functional.")
+        photo_payload = {
+            "chat_id": CHANNEL_ID,
+            "photo": photo_id,
+            "caption": caption_text,
+            "parse_mode": "HTML",
+            "reply_markup": json.dumps(keyboard)
+        }
+        requests.post(f"{TELEGRAM_API}/sendPhoto", json=photo_payload)
+
+        send_message(chat_id, "✅ Successfully posted to channel! Direct file link is now attached.")
         USER_STATES.pop(chat_id, None)
 
 class handler(BaseHTTPRequestHandler):
