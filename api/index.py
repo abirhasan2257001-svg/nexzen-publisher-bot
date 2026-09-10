@@ -6,9 +6,10 @@ import requests
 TOKEN = os.getenv("BOT_TOKEN")
 BOT_USERNAME = "NexzenLabsPublisherBot"
 PUBLIC_CHANNEL_ID = "@NexzenLabs"
-
-# Private Storage Channel ID to hide raw APKs from public channel
 STORAGE_CHANNEL_ID = "-1003861196242"
+
+# 🔒 ONLY YOU (OWNER) CAN CREATE POSTS
+ADMIN_ID = 7762727296
 
 TELEGRAM_API = f"https://api.telegram.org/bot{TOKEN}"
 
@@ -44,24 +45,36 @@ def handle_update(update):
 
     message = update["message"]
     chat_id = message["chat"]["id"]
+    user_id = message["from"]["id"]
     text = message.get("text", "")
 
+    # 1. ALLOW PUBLIC USERS TO DOWNLOAD FILES VIA DEEP LINK
     if text.startswith("/start"):
         args = text.split(" ")
         if len(args) > 1 and args[1].startswith("msg_"):
             try:
                 msg_id = int(args[1].replace("msg_", ""))
+                send_message(chat_id, " Here is your requested file!")
                 res = copy_message(chat_id, STORAGE_CHANNEL_ID, msg_id)
                 if not res.get("ok"):
-                    send_message(chat_id, "⚠️ File not found. Make sure bot is admin in storage channel.")
+                    send_message(chat_id, "⚠️ File not found or expired.")
             except Exception as e:
                 send_message(chat_id, "⚠️ Error retrieving file.")
             return
 
-        USER_STATES.pop(chat_id, None)
-        send_message(chat_id, "Hello Owner! Send /create to start making a post.")
+        if user_id == ADMIN_ID:
+            USER_STATES.pop(chat_id, None)
+            send_message(chat_id, "Hello Owner! Send /create to start making a post.")
+        else:
+            send_message(chat_id, "Welcome to Nexzen Labs Bot! Click on channel download buttons to get APK files.")
         return
 
+    # 2. BLOCK NON-ADMIN USERS FROM CREATING POSTS
+    if user_id != ADMIN_ID:
+        # Silently ignore or show access denied to other users
+        return
+
+    # 3. ADMIN-ONLY CONVERSATION FLOW
     if text == "/cancel":
         USER_STATES.pop(chat_id, None)
         send_message(chat_id, "Process cancelled.")
@@ -74,7 +87,7 @@ def handle_update(update):
 
     state = USER_STATES.get(chat_id)
     if not state:
-        send_message(chat_id, "Please send /create to start generating a post.")
+        send_message(chat_id, "Send /create to start generating a post.")
         return
 
     current_step = state.get("step")
@@ -121,7 +134,6 @@ def handle_update(update):
         file_id = state["file_id"]
         info_text = state["info"]
 
-        # Step 1: Send APK file ONLY to Private Storage Channel
         doc_payload = {
             "chat_id": STORAGE_CHANNEL_ID,
             "document": file_id,
@@ -131,12 +143,10 @@ def handle_update(update):
         doc_res = requests.post(f"{TELEGRAM_API}/sendDocument", json=doc_payload).json()
         
         if not doc_res.get("ok"):
-            send_message(chat_id, "❌ Error: Make sure @NexzenLabsPublisherBot is added as ADMIN in your Nexzen Storage channel!")
+            send_message(chat_id, "❌ Error saving file to storage channel.")
             return
 
         storage_msg_id = doc_res["result"]["message_id"]
-
-        # Step 2: Clean deep-link with message ID
         bot_deep_link = f"https://t.me/{BOT_USERNAME}?start=msg_{storage_msg_id}"
 
         caption_text = (
@@ -154,9 +164,8 @@ def handle_update(update):
             ]
         }
 
-        # Step 3: Send photo post ONLY to Public Channel
         send_photo_to_channel(PUBLIC_CHANNEL_ID, photo_id, caption_text, keyboard)
-        send_message(chat_id, "✅ Posted cleanly! APK saved in Private Storage and Main Channel is 100% clean.")
+        send_message(chat_id, "✅ Posted successfully to public channel!")
         USER_STATES.pop(chat_id, None)
 
 class handler(BaseHTTPRequestHandler):
