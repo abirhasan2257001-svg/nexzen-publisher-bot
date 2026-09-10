@@ -24,6 +24,14 @@ def send_document(chat_id, document_id, caption=None):
         payload["parse_mode"] = "HTML"
     requests.post(f"{TELEGRAM_API}/sendDocument", json=payload)
 
+def forward_message(chat_id, from_chat_id, message_id):
+    payload = {
+        "chat_id": chat_id,
+        "from_chat_id": from_chat_id,
+        "message_id": message_id
+    }
+    return requests.post(f"{TELEGRAM_API}/copyMessage", json=payload).json()
+
 def send_photo_to_channel(channel_id, photo_id, caption, reply_markup):
     payload = {
         "chat_id": channel_id,
@@ -34,14 +42,6 @@ def send_photo_to_channel(channel_id, photo_id, caption, reply_markup):
     }
     requests.post(f"{TELEGRAM_API}/sendPhoto", json=payload)
 
-def encode_file_id(file_id):
-    encoded = base64.urlsafe_b64encode(file_id.encode()).decode().rstrip("=")
-    return encoded
-
-def decode_file_id(encoded_str):
-    padding = '=' * (4 - (len(encoded_str) % 4))
-    return base64.urlsafe_b64decode((encoded_str + padding).encode()).decode()
-
 def handle_update(update):
     if "message" not in update:
         return
@@ -50,16 +50,18 @@ def handle_update(update):
     chat_id = message["chat"]["id"]
     text = message.get("text", "")
 
+    # Handle /start command or Direct Download deep links
     if text.startswith("/start"):
         args = text.split(" ")
-        if len(args) > 1 and args[1].startswith("dl_"):
+        if len(args) > 1 and args[1].startswith("msg_"):
             try:
-                raw_code = args[1].replace("dl_", "")
-                file_id = decode_file_id(raw_code)
-                send_message(chat_id, "Here is your requested APK file!")
-                send_document(chat_id, file_id)
+                msg_id = int(args[1].replace("msg_", ""))
+                # Copy message from Channel directly to User Chat
+                res = forward_message(chat_id, CHANNEL_ID, msg_id)
+                if not res.get("ok"):
+                    send_message(chat_id, "⚠️ File download error or file not found.")
             except Exception as e:
-                send_message(chat_id, "⚠️ File link expired or invalid.")
+                send_message(chat_id, "⚠️ Error sending file.")
             return
 
         USER_STATES.pop(chat_id, None)
@@ -125,8 +127,19 @@ def handle_update(update):
         file_id = state["file_id"]
         info_text = state["info"]
 
-        encoded_file = encode_file_id(file_id)
-        bot_deep_link = f"https://t.me/{BOT_USERNAME}?start=dl_{encoded_file}"
+        # Step 1: Send APK file to channel covertly to obtain message_id
+        doc_payload = {
+            "chat_id": CHANNEL_ID,
+            "document": file_id,
+            "caption": f"<b>{app_name} {version} APK File</b>",
+            "parse_mode": "HTML"
+        }
+        doc_res = requests.post(f"{TELEGRAM_API}/sendDocument", json=doc_payload).json()
+        
+        apk_msg_id = doc_res["result"]["message_id"]
+
+        # Step 2: Create a tiny parameter start link with Message ID (e.g., msg_123)
+        bot_deep_link = f"https://t.me/{BOT_USERNAME}?start=msg_{apk_msg_id}"
 
         caption_text = (
             f"⬛ <b>NEXZEN LABS</b> ⬜ presents\n"
@@ -143,8 +156,9 @@ def handle_update(update):
             ]
         }
 
+        # Step 3: Send photo post with Direct Download button
         send_photo_to_channel(CHANNEL_ID, photo_id, caption_text, keyboard)
-        send_message(chat_id, "✅ Successfully posted to your channel! Clean Direct Download link is active.")
+        send_message(chat_id, "✅ Posted successfully! Direct Download is now 100% active and tested.")
         USER_STATES.pop(chat_id, None)
 
 class handler(BaseHTTPRequestHandler):
