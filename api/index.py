@@ -1,12 +1,15 @@
 import os
 import json
-import base64
 from http.server import BaseHTTPRequestHandler
 import requests
 
 TOKEN = os.getenv("BOT_TOKEN")
 BOT_USERNAME = "NexzenLabsPublisherBot"
-CHANNEL_ID = "@NexzenLabs"
+PUBLIC_CHANNEL_ID = "@NexzenLabs"
+
+# Private Storage Channel ID to hide raw APKs from public channel
+STORAGE_CHANNEL_ID = "-1003861196242"
+
 TELEGRAM_API = f"https://api.telegram.org/bot{TOKEN}"
 
 USER_STATES = {}
@@ -17,14 +20,7 @@ def send_message(chat_id, text, reply_markup=None):
         payload["reply_markup"] = json.dumps(reply_markup)
     requests.post(f"{TELEGRAM_API}/sendMessage", json=payload)
 
-def send_document(chat_id, document_id, caption=None):
-    payload = {"chat_id": chat_id, "document": document_id}
-    if caption:
-        payload["caption"] = caption
-        payload["parse_mode"] = "HTML"
-    requests.post(f"{TELEGRAM_API}/sendDocument", json=payload)
-
-def forward_message(chat_id, from_chat_id, message_id):
+def copy_message(chat_id, from_chat_id, message_id):
     payload = {
         "chat_id": chat_id,
         "from_chat_id": from_chat_id,
@@ -50,18 +46,16 @@ def handle_update(update):
     chat_id = message["chat"]["id"]
     text = message.get("text", "")
 
-    # Handle /start command or Direct Download deep links
     if text.startswith("/start"):
         args = text.split(" ")
         if len(args) > 1 and args[1].startswith("msg_"):
             try:
                 msg_id = int(args[1].replace("msg_", ""))
-                # Copy message from Channel directly to User Chat
-                res = forward_message(chat_id, CHANNEL_ID, msg_id)
+                res = copy_message(chat_id, STORAGE_CHANNEL_ID, msg_id)
                 if not res.get("ok"):
-                    send_message(chat_id, "⚠️ File download error or file not found.")
+                    send_message(chat_id, "⚠️ File not found. Make sure bot is admin in storage channel.")
             except Exception as e:
-                send_message(chat_id, "⚠️ Error sending file.")
+                send_message(chat_id, "⚠️ Error retrieving file.")
             return
 
         USER_STATES.pop(chat_id, None)
@@ -127,19 +121,23 @@ def handle_update(update):
         file_id = state["file_id"]
         info_text = state["info"]
 
-        # Step 1: Send APK file to channel covertly to obtain message_id
+        # Step 1: Send APK file ONLY to Private Storage Channel
         doc_payload = {
-            "chat_id": CHANNEL_ID,
+            "chat_id": STORAGE_CHANNEL_ID,
             "document": file_id,
             "caption": f"<b>{app_name} {version} APK File</b>",
             "parse_mode": "HTML"
         }
         doc_res = requests.post(f"{TELEGRAM_API}/sendDocument", json=doc_payload).json()
         
-        apk_msg_id = doc_res["result"]["message_id"]
+        if not doc_res.get("ok"):
+            send_message(chat_id, "❌ Error: Make sure @NexzenLabsPublisherBot is added as ADMIN in your Nexzen Storage channel!")
+            return
 
-        # Step 2: Create a tiny parameter start link with Message ID (e.g., msg_123)
-        bot_deep_link = f"https://t.me/{BOT_USERNAME}?start=msg_{apk_msg_id}"
+        storage_msg_id = doc_res["result"]["message_id"]
+
+        # Step 2: Clean deep-link with message ID
+        bot_deep_link = f"https://t.me/{BOT_USERNAME}?start=msg_{storage_msg_id}"
 
         caption_text = (
             f"⬛ <b>NEXZEN LABS</b> ⬜ presents\n"
@@ -156,9 +154,9 @@ def handle_update(update):
             ]
         }
 
-        # Step 3: Send photo post with Direct Download button
-        send_photo_to_channel(CHANNEL_ID, photo_id, caption_text, keyboard)
-        send_message(chat_id, "✅ Posted successfully! Direct Download is now 100% active and tested.")
+        # Step 3: Send photo post ONLY to Public Channel
+        send_photo_to_channel(PUBLIC_CHANNEL_ID, photo_id, caption_text, keyboard)
+        send_message(chat_id, "✅ Posted cleanly! APK saved in Private Storage and Main Channel is 100% clean.")
         USER_STATES.pop(chat_id, None)
 
 class handler(BaseHTTPRequestHandler):
