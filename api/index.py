@@ -91,24 +91,31 @@ def handle_update(update):
             send_message(chat_id, "<b>Prompt Mode Selected</b>\nSend images/videos. Click Done when finished.", keyboard)
         elif data == "type_raw":
             USER_STATES[chat_id] = {"type": "RAW", "step": "MEDIA"}
-            send_message(chat_id, "<b>Raw File Mode Selected</b>\nStep 1: Send Cover Photo or Video for the post.")
-        elif data == "type_raw_ultra":
-            USER_STATES[chat_id] = {"type": "RAW_ULTRA", "step": "MAIN_MEDIA"}
-            send_message(chat_id, "<b>Raw Ultra Mode Selected</b>\nStep 1: Send Main Cover Photo or Video for the post.")
+            send_message(chat_id, "<b>Raw Mode Selected</b>\nStep 1: Send Cover Photo or Video for the post.")
+        elif data == "type_full_prompt":
+            USER_STATES[chat_id] = {"type": "FULL_PROMPT", "step": "MAIN_MEDIA", "items": []}
+            send_message(chat_id, "<b>🔥 Full Prompt Ultra Mode Selected</b>\nStep 1: Send Main Cover Photo or Video.")
         elif data == "btn_no":
             state = USER_STATES.get(chat_id)
             if state and state.get("type") == "RAW" and state.get("step") == "ASK_CUSTOM":
-                state["pending_file"]["custom_name"] = None
-                state["files"].append(state["pending_file"])
-                state["pending_file"] = None
+                state["pending_item"]["custom_name"] = None
+                state["files"].append(state["pending_item"])
+                state["pending_item"] = None
                 state["step"] = "FILES"
-                keyboard = {"inline_keyboard": [[{"text": "✅ Done Uploading Files", "callback_data": "raw_files_done"}]]}
-                send_message(chat_id, f"Added file with default button title. Send next file or click Done.", keyboard)
+                keyboard = {"inline_keyboard": [[{"text": "✅ Done Uploading Items", "callback_data": "raw_files_done"}]]}
+                send_message(chat_id, "Added item with default title. Send next item or click Done.", keyboard)
+            elif state and state.get("type") == "FULL_PROMPT" and state.get("step") == "ASK_CUSTOM":
+                state["pending_item"]["custom_name"] = None
+                state["items"].append(state["pending_item"])
+                state["pending_item"] = None
+                state["step"] = "ITEMS"
+                keyboard = {"inline_keyboard": [[{"text": "✅ Done Uploading Items", "callback_data": "full_prompt_done"}]]}
+                send_message(chat_id, "Added item with default title. Send next file/media/prompt or click Done.", keyboard)
         elif data == "btn_yes":
             state = USER_STATES.get(chat_id)
-            if state and state.get("type") == "RAW" and state.get("step") == "ASK_CUSTOM":
+            if state and state.get("step") == "ASK_CUSTOM":
                 state["step"] = "ENTER_CUSTOM"
-                send_message(chat_id, "Enter the custom button title for this file:")
+                send_message(chat_id, "Enter the custom button title for this item:")
         elif data == "media_done":
             state = USER_STATES.get(chat_id)
             if state and state.get("type") == "PROMPT" and state.get("step") == "MEDIA":
@@ -119,74 +126,81 @@ def handle_update(update):
                 send_message(chat_id, "Next Step: Send Caption for post.")
         elif data == "raw_files_done":
             state = USER_STATES.get(chat_id)
-            if state and state.get("type") in ["RAW", "RAW_ULTRA"]:
-                if state["type"] == "RAW":
-                    if not state.get("files"):
-                        send_message(chat_id, "⚠️ Send at least one file/document!")
-                        return
-                    buttons = []
-                    for f in state["files"]:
-                        doc_payload = {
-                            "chat_id": STORAGE_CHANNEL_ID,
-                            "document": f["file_id"],
-                            "caption": f"<b>{f['file_name']}</b>",
-                            "parse_mode": "HTML"
-                        }
+            if state and state.get("type") == "RAW":
+                if not state.get("files"):
+                    send_message(chat_id, "⚠️ Send at least one file or text prompt!")
+                    return
+                buttons = []
+                for f in state["files"]:
+                    if f["item_type"] == "doc":
+                        doc_payload = {"chat_id": STORAGE_CHANNEL_ID, "document": f["id"], "caption": f"<b>{f['name']}</b>", "parse_mode": "HTML"}
                         doc_res = requests.post(f"{TELEGRAM_API}/sendDocument", json=doc_payload).json()
-                        storage_msg_id = doc_res["result"]["message_id"]
-                        deep_link = f"https://t.me/{BOT_USERNAME}?start=msg_{storage_msg_id}"
-                        
-                        if f.get("custom_name"):
-                            btn_title = f["custom_name"]
-                        else:
-                            ext = f['file_name'].split('.')[-1].upper() if '.' in f['file_name'] else 'FILE'
-                            icon = "📄"
-                            if ext in ["PDF"]: icon = "📕"
-                            elif ext in ["HTML", "HTM"]: icon = "🌐"
-                            elif ext in ["ZIP", "RAR", "7Z"]: icon = "📦"
-                            elif ext in ["APK"]: icon = "📱"
-                            elif ext in ["PY", "JS", "TXT"]: icon = "📝"
-                            btn_title = f"{icon} Download {ext} ({f['file_name']})"
-                        
-                        buttons.append([{"text": btn_title, "url": deep_link}])
+                        msg_id = doc_res["result"]["message_id"]
+                        deep_link = f"https://t.me/{BOT_USERNAME}?start=msg_{msg_id}"
+                        default_name = f"📄 Download {f['name']}"
+                    else: # text prompt
+                        res = send_message(STORAGE_CHANNEL_ID, f"<b>PROMPT DATA:</b>\n\n<code>{f['text']}</code>")
+                        msg_id = res["result"]["message_id"]
+                        deep_link = f"https://t.me/{BOT_USERNAME}?start=prompt_{msg_id}"
+                        default_name = "📋 Get Prompt"
 
-                    keyboard = {"inline_keyboard": buttons}
-                    caption_text = f"{state['caption']}\n\n⬇️ <b>OFFICIAL DOWNLOADS</b> ⬇️"
+                    btn_title = f.get("custom_name") or default_name
+                    buttons.append([{"text": btn_title, "url": deep_link}])
 
-                    if state["media_type"] == "photo":
-                        requests.post(f"{TELEGRAM_API}/sendPhoto", json={"chat_id": PUBLIC_CHANNEL_ID, "photo": state["media"], "caption": caption_text, "parse_mode": "HTML", "reply_markup": json.dumps(keyboard)})
-                    else:
-                        requests.post(f"{TELEGRAM_API}/sendVideo", json={"chat_id": PUBLIC_CHANNEL_ID, "video": state["media"], "caption": caption_text, "parse_mode": "HTML", "reply_markup": json.dumps(keyboard)})
+                keyboard = {"inline_keyboard": buttons}
+                caption_text = f"{state['caption']}\n\n⬇️ <b>OFFICIAL LINKS / DOWNLOADS</b> ⬇️"
 
+                if state["media_type"] == "photo":
+                    requests.post(f"{TELEGRAM_API}/sendPhoto", json={"chat_id": PUBLIC_CHANNEL_ID, "photo": state["media"], "caption": caption_text, "parse_mode": "HTML", "reply_markup": json.dumps(keyboard)})
                 else:
-                    # RAW_ULTRA Publishing
-                    items = state.get("items", [])
-                    if not items:
-                        send_message(chat_id, "⚠️ Send at least one link/file item!")
-                        return
+                    requests.post(f"{TELEGRAM_API}/sendVideo", json={"chat_id": PUBLIC_CHANNEL_ID, "video": state["media"], "caption": caption_text, "parse_mode": "HTML", "reply_markup": json.dumps(keyboard)})
 
-                    buttons = []
-                    media_group = []
+                send_message(chat_id, "✅ Raw post published successfully!")
+                USER_STATES.pop(chat_id, None)
 
-                    # Add Main Media first with Caption
-                    main_media_obj = {"type": state["main_media_type"], "media": state["main_media"], "caption": f"{state['caption']}\n\n⬇️ <b>OFFICIAL LINKS</b> ⬇️", "parse_mode": "HTML"}
-                    media_group.append(main_media_obj)
+        elif data == "full_prompt_done":
+            state = USER_STATES.get(chat_id)
+            if state and state.get("type") == "FULL_PROMPT":
+                if not state.get("items"):
+                    send_message(chat_id, "⚠️ Send at least one media/file/prompt item!")
+                    return
+                
+                buttons = []
+                for item in state["items"]:
+                    target_link = ""
+                    default_title = "🔗 Open Link"
 
-                    for item in items:
-                        buttons.append([{"text": item["title"], "url": item["url"]}])
-                        if item.get("photo"):
-                            media_group.append({"type": "photo", "media": item["photo"]})
+                    if item["type"] == "link":
+                        target_link = item["url"]
+                        default_title = "🌐 Visit Link"
+                    elif item["type"] in ["photo", "video", "document"]:
+                        media_kind = item["type"]
+                        endpoint = "sendPhoto" if media_kind == "photo" else ("sendVideo" if media_kind == "video" else "sendDocument")
+                        doc_res = requests.post(f"{TELEGRAM_API}/{endpoint}", json={"chat_id": STORAGE_CHANNEL_ID, media_kind: item["id"]}).json()
+                        msg_id = doc_res["result"]["message_id"]
+                        target_link = f"https://t.me/{BOT_USERNAME}?start=msg_{msg_id}"
+                        
+                        if media_kind == "photo": default_title = "🖼️ View Image"
+                        elif media_kind == "video": default_title = "🎬 View Video"
+                        else: default_title = f"📄 Download File ({item.get('name', 'Doc')})"
+                    elif item["type"] == "text":
+                        res = send_message(STORAGE_CHANNEL_ID, f"<b>PROMPT DATA:</b>\n\n<code>{item['text']}</code>")
+                        msg_id = res["result"]["message_id"]
+                        target_link = f"https://t.me/{BOT_USERNAME}?start=prompt_{msg_id}"
+                        default_title = "📋 Copy Prompt"
 
-                    keyboard = {"inline_keyboard": buttons}
+                    btn_title = item.get("custom_name") or default_title
+                    buttons.append([{"text": btn_title, "url": target_link}])
 
-                    if len(media_group) == 1:
-                        endpoint = "sendPhoto" if state["main_media_type"] == "photo" else "sendVideo"
-                        requests.post(f"{TELEGRAM_API}/{endpoint}", json={"chat_id": PUBLIC_CHANNEL_ID, state["main_media_type"]: state["main_media"], "caption": main_media_obj["caption"], "parse_mode": "HTML", "reply_markup": json.dumps(keyboard)})
-                    else:
-                        requests.post(f"{TELEGRAM_API}/sendMediaGroup", json={"chat_id": PUBLIC_CHANNEL_ID, "media": json.dumps(media_group)})
-                        send_message(PUBLIC_CHANNEL_ID, "👇 Click buttons to access links:", keyboard)
+                keyboard = {"inline_keyboard": buttons}
+                caption_text = f"{state['caption']}\n\n⬇️ <b>GET MEDIA / PROMPTS BELOW</b> ⬇️"
 
-                send_message(chat_id, "✅ Raw Ultra post published successfully!")
+                if state["main_media_type"] == "photo":
+                    requests.post(f"{TELEGRAM_API}/sendPhoto", json={"chat_id": PUBLIC_CHANNEL_ID, "photo": state["main_media"], "caption": caption_text, "parse_mode": "HTML", "reply_markup": json.dumps(keyboard)})
+                else:
+                    requests.post(f"{TELEGRAM_API}/sendVideo", json={"chat_id": PUBLIC_CHANNEL_ID, "video": state["main_media"], "caption": caption_text, "parse_mode": "HTML", "reply_markup": json.dumps(keyboard)})
+
+                send_message(chat_id, "✅ Full Prompt Ultra post published successfully!")
                 USER_STATES.pop(chat_id, None)
         return
 
@@ -215,7 +229,7 @@ def handle_update(update):
             param = args[1]
             if param.startswith("msg_"):
                 msg_id = int(param.replace("msg_", ""))
-                send_message(chat_id, "📦 <b>Here is your file!</b> (Auto-deletes in 60s)")
+                send_message(chat_id, "📦 <b>Here is your file/media!</b> (Auto-deletes in 60s)")
                 res = copy_message(chat_id, STORAGE_CHANNEL_ID, msg_id)
                 if res.get("ok"):
                     file_msg_id = res["result"]["message_id"]
@@ -269,8 +283,8 @@ def handle_update(update):
             "inline_keyboard": [
                 [{"text": "📱 Publish App", "callback_data": "type_app"}],
                 [{"text": "🎬 Publish Prompt & Media", "callback_data": "type_prompt"}],
-                [{"text": "📁 Publish Raw / Custom Files", "callback_data": "type_raw"}],
-                [{"text": "🚀 Publish Raw Ultra (Multi-Image + Links)", "callback_data": "type_raw_ultra"}]
+                [{"text": "📁 Publish Raw (Docs & Text Prompts)", "callback_data": "type_raw"}],
+                [{"text": "🔥 Publish Full Prompt Ultra (PDF, Photo, Video, Text & Links)", "callback_data": "type_full_prompt"}]
             ]
         }
         send_message(chat_id, "What type of post do you want to create?", keyboard)
@@ -282,8 +296,8 @@ def handle_update(update):
     post_type = state.get("type")
     current_step = state.get("step")
 
-    # --- RAW ULTRA MODE FLOW ---
-    if post_type == "RAW_ULTRA":
+    # --- FULL PROMPT ULTRA FLOW ---
+    if post_type == "FULL_PROMPT":
         if current_step == "MAIN_MEDIA":
             if "photo" in message:
                 state["main_media"] = message["photo"][-1]["file_id"]
@@ -292,7 +306,7 @@ def handle_update(update):
                 state["main_media"] = message["video"]["file_id"]
                 state["main_media_type"] = "video"
             else:
-                send_message(chat_id, "Please send a valid Photo or Video.")
+                send_message(chat_id, "Please send a valid Photo or Video for main cover.")
                 return
 
             state["step"] = "CAPTION"
@@ -300,47 +314,44 @@ def handle_update(update):
 
         elif current_step == "CAPTION":
             state["caption"] = text
-            state["items"] = []
-            state["step"] = "ITEM_LINK"
-            keyboard = {"inline_keyboard": [[{"text": "✅ Done Uploading All Items", "callback_data": "raw_files_done"}]]}
-            send_message(chat_id, "Step 3: Send URL/Link (e.g., https://google.com) or Upload Document for Item 1:", keyboard)
+            state["step"] = "ITEMS"
+            keyboard = {"inline_keyboard": [[{"text": "✅ Done Uploading Items", "callback_data": "full_prompt_done"}]]}
+            send_message(chat_id, "Step 3: Send any Photo, Video, Document/PDF, Text Prompt, or HTTP Link for Button 1:", keyboard)
 
-        elif current_step == "ITEM_LINK":
-            target_url = None
-            if text.startswith("http://") or text.startswith("https://"):
-                target_url = text
+        elif current_step == "ITEMS":
+            pending = None
+            if "photo" in message:
+                pending = {"type": "photo", "id": message["photo"][-1]["file_id"]}
+            elif "video" in message:
+                pending = {"type": "video", "id": message["video"]["file_id"]}
             elif "document" in message:
                 doc = message["document"]
-                doc_payload = {
-                    "chat_id": STORAGE_CHANNEL_ID,
-                    "document": doc["file_id"],
-                    "caption": f"<b>{doc.get('file_name', 'File')}</b>",
-                    "parse_mode": "HTML"
+                pending = {"type": "document", "id": doc["file_id"], "name": doc.get("file_name", "File")}
+            elif text.startswith("http://") or text.startswith("https://"):
+                pending = {"type": "link", "url": text}
+            elif text:
+                pending = {"type": "text", "text": text}
+
+            if pending:
+                state["pending_item"] = pending
+                state["step"] = "ASK_CUSTOM"
+                keyboard = {
+                    "inline_keyboard": [
+                        [{"text": "✏️ Yes (Set Custom Button Title)", "callback_data": "btn_yes"}],
+                        [{"text": "❌ No (Use Default Title)", "callback_data": "btn_no"}]
+                    ]
                 }
-                doc_res = requests.post(f"{TELEGRAM_API}/sendDocument", json=doc_payload).json()
-                storage_msg_id = doc_res["result"]["message_id"]
-                target_url = f"https://t.me/{BOT_USERNAME}?start=msg_{storage_msg_id}"
-
-            if target_url:
-                state["pending_item"] = {"url": target_url}
-                state["step"] = "ITEM_TITLE"
-                send_message(chat_id, "Enter Button Title for this item (e.g., Google, OpenAI):")
+                send_message(chat_id, "Item received! Do you want to set a custom title for this button?", keyboard)
             else:
-                send_message(chat_id, "Please send a valid Link or Document.")
+                send_message(chat_id, "Please send a photo, video, document, text prompt, or valid link.")
 
-        elif current_step == "ITEM_TITLE":
-            state["pending_item"]["title"] = text
-            state["step"] = "ITEM_PHOTO"
-            send_message(chat_id, f"Optional: Send Cover Photo for <b>{text}</b> (or type /skip to skip photo):")
-
-        elif current_step == "ITEM_PHOTO":
-            if "photo" in message:
-                state["pending_item"]["photo"] = message["photo"][-1]["file_id"]
+        elif current_step == "ENTER_CUSTOM":
+            state["pending_item"]["custom_name"] = text
             state["items"].append(state["pending_item"])
             state["pending_item"] = None
-            state["step"] = "ITEM_LINK"
-            keyboard = {"inline_keyboard": [[{"text": "✅ Done Uploading All Items", "callback_data": "raw_files_done"}]]}
-            send_message(chat_id, f"Added Item {len(state['items'])}! Send next URL/Link, or click <b>Done Uploading All Items</b>.", keyboard)
+            state["step"] = "ITEMS"
+            keyboard = {"inline_keyboard": [[{"text": "✅ Done Uploading Items", "callback_data": "full_prompt_done"}]]}
+            send_message(chat_id, f"Custom button saved: <b>{text}</b>. Send next item or click <b>Done Uploading Items</b>.", keyboard)
 
     # --- RAW MODE FLOW ---
     elif post_type == "RAW":
@@ -356,22 +367,25 @@ def handle_update(update):
                 return
 
             state["step"] = "CAPTION"
-            send_message(chat_id, "Step 2: Send the Caption/Description for the post.")
+            send_message(chat_id, "Step 2: Send Caption/Description for the post.")
 
         elif current_step == "CAPTION":
             state["caption"] = text
             state["step"] = "FILES"
             state["files"] = []
-            keyboard = {"inline_keyboard": [[{"text": "✅ Done Uploading Files", "callback_data": "raw_files_done"}]]}
-            send_message(chat_id, "Step 3: Send your files/documents one by one.", keyboard)
+            keyboard = {"inline_keyboard": [[{"text": "✅ Done Uploading Items", "callback_data": "raw_files_done"}]]}
+            send_message(chat_id, "Step 3: Send Document files or Text Prompts one by one.", keyboard)
 
         elif current_step == "FILES":
+            pending = None
             if "document" in message:
                 doc = message["document"]
-                state["pending_file"] = {
-                    "file_id": doc["file_id"],
-                    "file_name": doc.get("file_name", "File")
-                }
+                pending = {"item_type": "doc", "id": doc["file_id"], "name": doc.get("file_name", "File")}
+            elif text:
+                pending = {"item_type": "text", "text": text}
+
+            if pending:
+                state["pending_item"] = pending
                 state["step"] = "ASK_CUSTOM"
                 keyboard = {
                     "inline_keyboard": [
@@ -379,17 +393,17 @@ def handle_update(update):
                         [{"text": "❌ No (Use Default Title)", "callback_data": "btn_no"}]
                     ]
                 }
-                send_message(chat_id, f"File received: <b>{doc.get('file_name')}</b>\nDo you want to set a custom title for this button?", keyboard)
+                send_message(chat_id, "Item received! Do you want to set a custom title for this button?", keyboard)
             else:
-                send_message(chat_id, "Please upload a valid Document / File.")
+                send_message(chat_id, "Please upload a valid Document or Text Prompt.")
 
         elif current_step == "ENTER_CUSTOM":
-            state["pending_file"]["custom_name"] = text
-            state["files"].append(state["pending_file"])
-            state["pending_file"] = None
+            state["pending_item"]["custom_name"] = text
+            state["files"].append(state["pending_item"])
+            state["pending_item"] = None
             state["step"] = "FILES"
-            keyboard = {"inline_keyboard": [[{"text": "✅ Done Uploading Files", "callback_data": "raw_files_done"}]]}
-            send_message(chat_id, f"Custom name saved! Send next file or click <b>Done Uploading Files</b>.", keyboard)
+            keyboard = {"inline_keyboard": [[{"text": "✅ Done Uploading Items", "callback_data": "raw_files_done"}]]}
+            send_message(chat_id, f"Custom title saved! Send next item or click <b>Done Uploading Items</b>.", keyboard)
 
     # --- APP FLOW ---
     elif post_type == "APP":
