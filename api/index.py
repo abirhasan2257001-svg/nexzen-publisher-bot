@@ -70,6 +70,15 @@ def check_channel_membership(user_id):
         pass
     return False
 
+def ultra_raw_menu():
+    return {"inline_keyboard": [
+        [{"text": "📄 PDF / Document", "callback_data": "add_pdf"}, {"text": "📱 APK File", "callback_data": "add_apk"}],
+        [{"text": "📦 ZIP / Other File", "callback_data": "add_other"}, {"text": "🔗 Link / URL", "callback_data": "add_link"}],
+        [{"text": "📝 Text Prompt", "callback_data": "add_text"}, {"text": "🖼️ Image", "callback_data": "add_image"}],
+        [{"text": "🎬 Video", "callback_data": "add_video"}],
+        [{"text": "✅ Done Uploading Items", "callback_data": "ultra_done"}]
+    ]}
+
 def handle_update(update):
     save_bot_user(update.get("message", {}).get("from", {}).get("id") or update.get("callback_query", {}).get("from", {}).get("id"))
 
@@ -79,6 +88,7 @@ def handle_update(update):
         user_id = query["from"]["id"]
         data = query["data"]
 
+        # ADMIN ONLY - regular users cannot use any buttons
         if user_id != ADMIN_ID:
             return
 
@@ -98,8 +108,6 @@ def handle_update(update):
         elif data == "type_ultra_raw":
             USER_STATES[chat_id] = {"type": "ULTRA_RAW", "step": "MAIN_MEDIA", "items": []}
             send_message(chat_id, "<b>⚡ Ultra Raw Mode Selected</b>\nStep 1: Send Main Cover Photo or Video.")
-            
-        # Ultra Raw Menu Callbacks
         elif data == "add_pdf":
             state = USER_STATES.get(chat_id)
             if state and state.get("type") == "ULTRA_RAW":
@@ -138,7 +146,6 @@ def handle_update(update):
             if state and state.get("type") == "ULTRA_RAW":
                 state["step"] = "AWAIT_VIDEO"
                 send_message(chat_id, "🎬 Please send the Video.")
-                
         elif data == "ultra_done":
             state = USER_STATES.get(chat_id)
             if state and state.get("type") == "ULTRA_RAW":
@@ -194,7 +201,6 @@ def handle_update(update):
 
                 send_message(chat_id, "✅ Ultra Raw post published successfully!")
                 USER_STATES.pop(chat_id, None)
-                
         elif data == "btn_no":
             state = USER_STATES.get(chat_id)
             if state and state.get("step") == "ASK_CUSTOM":
@@ -212,14 +218,7 @@ def handle_update(update):
                 elif state.get("type") == "ULTRA_RAW":
                     state["items"].append(state["pending_item"])
                     state["step"] = "MENU"
-                    keyboard = {"inline_keyboard": [
-                        [{"text": "📄 PDF / Document", "callback_data": "add_pdf"}, {"text": "📱 APK File", "callback_data": "add_apk"}],
-                        [{"text": "📦 ZIP / Other File", "callback_data": "add_other"}, {"text": "🔗 Link / URL", "callback_data": "add_link"}],
-                        [{"text": "📝 Text Prompt", "callback_data": "add_text"}, {"text": "🖼️ Image", "callback_data": "add_image"}],
-                        [{"text": "🎬 Video", "callback_data": "add_video"}],
-                        [{"text": "✅ Done Uploading Items", "callback_data": "ultra_done"}]
-                    ]}
-                    send_message(chat_id, "Added item with default title. Choose next item or click Done.", keyboard)
+                    send_message(chat_id, "Added item with default title. Choose next item or click Done.", ultra_raw_menu())
         elif data == "btn_yes":
             state = USER_STATES.get(chat_id)
             if state and state.get("step") == "ASK_CUSTOM":
@@ -247,7 +246,7 @@ def handle_update(update):
                         msg_id = doc_res["result"]["message_id"]
                         deep_link = f"https://t.me/{BOT_USERNAME}?start=msg_{msg_id}"
                         default_name = f"📄 Download {f['name']}"
-                    else: # text prompt
+                    else:
                         res = send_message(STORAGE_CHANNEL_ID, f"<b>PROMPT DATA:</b>\n\n<code>{f['text']}</code>")
                         msg_id = res["result"]["message_id"]
                         deep_link = f"https://t.me/{BOT_USERNAME}?start=prompt_{msg_id}"
@@ -321,7 +320,7 @@ def handle_update(update):
     user_id = message["from"]["id"]
     text = message.get("text", "")
 
-    # Force Join Verification
+    # Force Join Verification (for non-admin users only)
     if user_id != ADMIN_ID and not check_channel_membership(user_id):
         start_args = text.split()
         start_param = start_args[1] if len(start_args) > 1 else "home"
@@ -362,6 +361,7 @@ def handle_update(update):
             send_message(chat_id, "Welcome to Nexzen Labs Bot!")
         return
 
+    # BLOCK ALL NON-ADMIN USERS FROM ANY CONTROL/PUBLISH FEATURES
     if user_id != ADMIN_ID:
         return
 
@@ -427,14 +427,7 @@ def handle_update(update):
         elif current_step == "CAPTION":
             state["caption"] = text
             state["step"] = "MENU"
-            keyboard = {"inline_keyboard": [
-                [{"text": "📄 PDF / Document", "callback_data": "add_pdf"}, {"text": "📱 APK File", "callback_data": "add_apk"}],
-                [{"text": "📦 ZIP / Other File", "callback_data": "add_other"}, {"text": "🔗 Link / URL", "callback_data": "add_link"}],
-                [{"text": "📝 Text Prompt", "callback_data": "add_text"}, {"text": "🖼️ Image", "callback_data": "add_image"}],
-                [{"text": "🎬 Video", "callback_data": "add_video"}],
-                [{"text": "✅ Done Uploading Items", "callback_data": "ultra_done"}]
-            ]}
-            send_message(chat_id, "Step 3: Choose what you want to add from the menu below:", keyboard)
+            send_message(chat_id, "Step 3: Choose what you want to add from the menu below:", ultra_raw_menu())
 
         elif current_step == "AWAIT_DOC":
             if "document" in message:
@@ -517,14 +510,7 @@ def handle_update(update):
             state["items"].append(state["pending_item"])
             state["pending_item"] = None
             state["step"] = "MENU"
-            keyboard = {"inline_keyboard": [
-                [{"text": "📄 PDF / Document", "callback_data": "add_pdf"}, {"text": "📱 APK File", "callback_data": "add_apk"}],
-                [{"text": "📦 ZIP / Other File", "callback_data": "add_other"}, {"text": "🔗 Link / URL", "callback_data": "add_link"}],
-                [{"text": "📝 Text Prompt", "callback_data": "add_text"}, {"text": "🖼️ Image", "callback_data": "add_image"}],
-                [{"text": "🎬 Video", "callback_data": "add_video"}],
-                [{"text": "✅ Done Uploading Items", "callback_data": "ultra_done"}]
-            ]}
-            send_message(chat_id, f"Custom button saved: <b>{text}</b>. Choose next item or click <b>Done Uploading Items</b>.", keyboard)
+            send_message(chat_id, f"Custom button saved: <b>{text}</b>. Choose next item or click <b>Done Uploading Items</b>.", ultra_raw_menu())
 
     # --- FULL PROMPT ULTRA FLOW ---
     elif post_type == "FULL_PROMPT":
