@@ -98,6 +98,8 @@ def handle_update(update):
         elif data == "type_ultra_raw":
             USER_STATES[chat_id] = {"type": "ULTRA_RAW", "step": "MAIN_MEDIA", "items": []}
             send_message(chat_id, "<b>⚡ Ultra Raw Mode Selected</b>\nStep 1: Send Main Cover Photo or Video.")
+            
+        # Ultra Raw Menu Callbacks
         elif data == "add_pdf":
             state = USER_STATES.get(chat_id)
             if state and state.get("type") == "ULTRA_RAW":
@@ -110,6 +112,12 @@ def handle_update(update):
                 state["step"] = "AWAIT_DOC"
                 state["doc_intent"] = "apk"
                 send_message(chat_id, "📱 Please send the APK file.")
+        elif data == "add_other":
+            state = USER_STATES.get(chat_id)
+            if state and state.get("type") == "ULTRA_RAW":
+                state["step"] = "AWAIT_DOC"
+                state["doc_intent"] = "other"
+                send_message(chat_id, "📦 Please send the ZIP, RAR, Text File, or any other Document.")
         elif data == "add_link":
             state = USER_STATES.get(chat_id)
             if state and state.get("type") == "ULTRA_RAW":
@@ -130,6 +138,7 @@ def handle_update(update):
             if state and state.get("type") == "ULTRA_RAW":
                 state["step"] = "AWAIT_VIDEO"
                 send_message(chat_id, "🎬 Please send the Video.")
+                
         elif data == "ultra_done":
             state = USER_STATES.get(chat_id)
             if state and state.get("type") == "ULTRA_RAW":
@@ -162,6 +171,8 @@ def handle_update(update):
                         target_link = f"https://t.me/{BOT_USERNAME}?start=msg_{msg_id}"
                         if intent == "apk":
                             default_title = "📱 Download APK"
+                        elif intent == "other":
+                            default_title = f"📦 Download File ({item.get('name', 'File')})"
                         else:
                             default_title = f"📄 Download File ({item.get('name', 'Doc')})"
                     elif item["type"] == "text":
@@ -183,6 +194,7 @@ def handle_update(update):
 
                 send_message(chat_id, "✅ Ultra Raw post published successfully!")
                 USER_STATES.pop(chat_id, None)
+                
         elif data == "btn_no":
             state = USER_STATES.get(chat_id)
             if state and state.get("step") == "ASK_CUSTOM":
@@ -202,8 +214,9 @@ def handle_update(update):
                     state["step"] = "MENU"
                     keyboard = {"inline_keyboard": [
                         [{"text": "📄 PDF / Document", "callback_data": "add_pdf"}, {"text": "📱 APK File", "callback_data": "add_apk"}],
-                        [{"text": "🔗 Link / URL", "callback_data": "add_link"}, {"text": "📝 Text Prompt", "callback_data": "add_text"}],
-                        [{"text": "🖼️ Image", "callback_data": "add_image"}, {"text": "🎬 Video", "callback_data": "add_video"}],
+                        [{"text": "📦 ZIP / Other File", "callback_data": "add_other"}, {"text": "🔗 Link / URL", "callback_data": "add_link"}],
+                        [{"text": "📝 Text Prompt", "callback_data": "add_text"}, {"text": "🖼️ Image", "callback_data": "add_image"}],
+                        [{"text": "🎬 Video", "callback_data": "add_video"}],
                         [{"text": "✅ Done Uploading Items", "callback_data": "ultra_done"}]
                     ]}
                     send_message(chat_id, "Added item with default title. Choose next item or click Done.", keyboard)
@@ -310,10 +323,12 @@ def handle_update(update):
 
     # Force Join Verification
     if user_id != ADMIN_ID and not check_channel_membership(user_id):
+        start_args = text.split()
+        start_param = start_args[1] if len(start_args) > 1 else "home"
         keyboard = {
             "inline_keyboard": [
                 [{"text": "📢 Join Channel", "url": f"https://t.me/{PUBLIC_CHANNEL_ID.replace('@', '')}"}],
-                [{"text": "🔄 Try Again", "url": f"https://t.me/{BOT_USERNAME}?start={text.replace('/start ', '')}"}]
+                [{"text": "🔄 Try Again", "url": f"https://t.me/{BOT_USERNAME}?start={start_param}"}]
             ]
         }
         send_message(chat_id, "⚠️ <b>Access Denied!</b>\n\nYou must join our official channel to download files or get prompts.", keyboard)
@@ -414,8 +429,9 @@ def handle_update(update):
             state["step"] = "MENU"
             keyboard = {"inline_keyboard": [
                 [{"text": "📄 PDF / Document", "callback_data": "add_pdf"}, {"text": "📱 APK File", "callback_data": "add_apk"}],
-                [{"text": "🔗 Link / URL", "callback_data": "add_link"}, {"text": "📝 Text Prompt", "callback_data": "add_text"}],
-                [{"text": "🖼️ Image", "callback_data": "add_image"}, {"text": "🎬 Video", "callback_data": "add_video"}],
+                [{"text": "📦 ZIP / Other File", "callback_data": "add_other"}, {"text": "🔗 Link / URL", "callback_data": "add_link"}],
+                [{"text": "📝 Text Prompt", "callback_data": "add_text"}, {"text": "🖼️ Image", "callback_data": "add_image"}],
+                [{"text": "🎬 Video", "callback_data": "add_video"}],
                 [{"text": "✅ Done Uploading Items", "callback_data": "ultra_done"}]
             ]}
             send_message(chat_id, "Step 3: Choose what you want to add from the menu below:", keyboard)
@@ -503,8 +519,9 @@ def handle_update(update):
             state["step"] = "MENU"
             keyboard = {"inline_keyboard": [
                 [{"text": "📄 PDF / Document", "callback_data": "add_pdf"}, {"text": "📱 APK File", "callback_data": "add_apk"}],
-                [{"text": "🔗 Link / URL", "callback_data": "add_link"}, {"text": "📝 Text Prompt", "callback_data": "add_text"}],
-                [{"text": "🖼️ Image", "callback_data": "add_image"}, {"text": "🎬 Video", "callback_data": "add_video"}],
+                [{"text": "📦 ZIP / Other File", "callback_data": "add_other"}, {"text": "🔗 Link / URL", "callback_data": "add_link"}],
+                [{"text": "📝 Text Prompt", "callback_data": "add_text"}, {"text": "🖼️ Image", "callback_data": "add_image"}],
+                [{"text": "🎬 Video", "callback_data": "add_video"}],
                 [{"text": "✅ Done Uploading Items", "callback_data": "ultra_done"}]
             ]}
             send_message(chat_id, f"Custom button saved: <b>{text}</b>. Choose next item or click <b>Done Uploading Items</b>.", keyboard)
