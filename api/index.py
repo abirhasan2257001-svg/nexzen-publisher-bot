@@ -95,6 +95,17 @@ def handle_update(update):
         elif data == "type_full_prompt":
             USER_STATES[chat_id] = {"type": "FULL_PROMPT", "step": "MAIN_MEDIA", "items": []}
             send_message(chat_id, "<b>🔥 Full Prompt Ultra Mode Selected</b>\nStep 1: Send Main Cover Photo or Video.")
+
+        elif data == "type_ultra_raw":
+            USER_STATES[chat_id] = {
+                "type": "ULTRA_RAW",
+                "step": "COVER",
+                "items": []
+            }
+            send_message(
+                chat_id,
+                "<b>⚡ ULTRA RAW MODE</b>\n\nStep 1: Send Cover Photo or Video."
+            )
         elif data == "btn_no":
             state = USER_STATES.get(chat_id)
             if state and state.get("type") == "RAW" and state.get("step") == "ASK_CUSTOM":
@@ -116,6 +127,336 @@ def handle_update(update):
             if state and state.get("step") == "ASK_CUSTOM":
                 state["step"] = "ENTER_CUSTOM"
                 send_message(chat_id, "Enter the custom button title for this item:")
+        # ========================================================
+        # ULTRA RAW MODE CALLBACKS
+        # ========================================================
+
+        elif data == "ultraraw_done":
+            state = USER_STATES.get(chat_id)
+
+            if state and state.get("type") == "ULTRA_RAW":
+                if not state.get("items"):
+                    send_message(
+                        chat_id,
+                        "⚠️ <b>No items added!</b>\nAdd at least one item before publishing."
+                    )
+                    return
+
+                buttons = []
+
+                for item in state["items"]:
+                    item_type = item["type"]
+                    custom_name = item.get("custom_name")
+
+                    try:
+                        if item_type == "pdf":
+                            res = requests.post(
+                                f"{TELEGRAM_API}/sendDocument",
+                                json={
+                                    "chat_id": STORAGE_CHANNEL_ID,
+                                    "document": item["id"],
+                                    "caption": f"<b>{item.get('name', 'PDF')}</b>",
+                                    "parse_mode": "HTML"
+                                }
+                            ).json()
+
+                            if not res.get("ok"):
+                                continue
+
+                            msg_id = res["result"]["message_id"]
+                            url = f"https://t.me/{BOT_USERNAME}?start=msg_{msg_id}"
+                            default_name = f"📄 Download {item.get('name', 'PDF')}"
+
+                        elif item_type == "apk":
+                            res = requests.post(
+                                f"{TELEGRAM_API}/sendDocument",
+                                json={
+                                    "chat_id": STORAGE_CHANNEL_ID,
+                                    "document": item["id"],
+                                    "caption": f"<b>{item.get('name', 'APK')}</b>",
+                                    "parse_mode": "HTML"
+                                }
+                            ).json()
+
+                            if not res.get("ok"):
+                                continue
+
+                            msg_id = res["result"]["message_id"]
+                            url = f"https://t.me/{BOT_USERNAME}?start=msg_{msg_id}"
+                            default_name = f"📱 Download {item.get('name', 'APK')}"
+
+                        elif item_type == "file":
+                            res = requests.post(
+                                f"{TELEGRAM_API}/sendDocument",
+                                json={
+                                    "chat_id": STORAGE_CHANNEL_ID,
+                                    "document": item["id"],
+                                    "caption": f"<b>{item.get('name', 'File')}</b>",
+                                    "parse_mode": "HTML"
+                                }
+                            ).json()
+
+                            if not res.get("ok"):
+                                continue
+
+                            msg_id = res["result"]["message_id"]
+                            url = f"https://t.me/{BOT_USERNAME}?start=msg_{msg_id}"
+                            default_name = f"📦 Download {item.get('name', 'File')}"
+
+                        elif item_type == "image":
+                            res = requests.post(
+                                f"{TELEGRAM_API}/sendPhoto",
+                                json={
+                                    "chat_id": STORAGE_CHANNEL_ID,
+                                    "photo": item["id"]
+                                }
+                            ).json()
+
+                            if not res.get("ok"):
+                                continue
+
+                            msg_id = res["result"]["message_id"]
+                            url = f"https://t.me/{BOT_USERNAME}?start=msg_{msg_id}"
+                            default_name = "🖼️ View Image"
+
+                        elif item_type == "video":
+                            res = requests.post(
+                                f"{TELEGRAM_API}/sendVideo",
+                                json={
+                                    "chat_id": STORAGE_CHANNEL_ID,
+                                    "video": item["id"]
+                                }
+                            ).json()
+
+                            if not res.get("ok"):
+                                continue
+
+                            msg_id = res["result"]["message_id"]
+                            url = f"https://t.me/{BOT_USERNAME}?start=msg_{msg_id}"
+                            default_name = "🎬 View Video"
+
+                        elif item_type == "audio":
+                            res = requests.post(
+                                f"{TELEGRAM_API}/sendAudio",
+                                json={
+                                    "chat_id": STORAGE_CHANNEL_ID,
+                                    "audio": item["id"]
+                                }
+                            ).json()
+
+                            if not res.get("ok"):
+                                continue
+
+                            msg_id = res["result"]["message_id"]
+                            url = f"https://t.me/{BOT_USERNAME}?start=msg_{msg_id}"
+                            default_name = f"🎵 Get Audio{(' - ' + item.get('name')) if item.get('name') else ''}"
+
+                        elif item_type == "text":
+                            escaped_text = item["text"].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+                            res = send_message(
+                                STORAGE_CHANNEL_ID,
+                                f"<b>PROMPT DATA:</b>\n\n<code>{escaped_text}</code>"
+                            )
+
+                            if not res.get("ok"):
+                                continue
+
+                            msg_id = res["result"]["message_id"]
+                            url = f"https://t.me/{BOT_USERNAME}?start=prompt_{msg_id}"
+                            default_name = "📝 Get Prompt"
+
+                        elif item_type == "link":
+                            url = item["url"]
+                            default_name = "🔗 Open Link"
+
+                        else:
+                            continue
+
+                        button_name = custom_name or default_name
+                        buttons.append([
+                            {
+                                "text": button_name,
+                                "url": url
+                            }
+                        ])
+
+                    except Exception as e:
+                        print("Ultra Raw item error:", e)
+
+                if not buttons:
+                    send_message(chat_id, "❌ Could not prepare any items.")
+                    return
+
+                keyboard = {
+                    "inline_keyboard": buttons
+                }
+
+                caption_text = (
+                    f"{state.get('caption', '')}\n\n"
+                    "⬇️ <b>GET MEDIA / FILES / PROMPTS BELOW</b> ⬇️"
+                )
+
+                try:
+                    if state["cover_type"] == "photo":
+                        result = requests.post(
+                            f"{TELEGRAM_API}/sendPhoto",
+                            json={
+                                "chat_id": PUBLIC_CHANNEL_ID,
+                                "photo": state["cover"],
+                                "caption": caption_text,
+                                "parse_mode": "HTML",
+                                "reply_markup": json.dumps(keyboard)
+                            }
+                        ).json()
+                    else:
+                        result = requests.post(
+                            f"{TELEGRAM_API}/sendVideo",
+                            json={
+                                "chat_id": PUBLIC_CHANNEL_ID,
+                                "video": state["cover"],
+                                "caption": caption_text,
+                                "parse_mode": "HTML",
+                                "reply_markup": json.dumps(keyboard)
+                            }
+                        ).json()
+
+                    if result.get("ok"):
+                        send_message(
+                            chat_id,
+                            f"✅ <b>ULTRA RAW POST PUBLISHED!</b>\n\n"
+                            f"Total items: <b>{len(buttons)}</b>"
+                        )
+                    else:
+                        send_message(
+                            chat_id,
+                            "❌ Publishing failed. Please check bot permissions."
+                        )
+
+                except Exception as e:
+                    print("Ultra Raw publish error:", e)
+                    send_message(chat_id, "❌ Publishing failed.")
+
+                USER_STATES.pop(chat_id, None)
+
+        elif data == "ultraraw_add_pdf":
+            state = USER_STATES.get(chat_id)
+
+            if state and state.get("type") == "ULTRA_RAW":
+                state["selected_type"] = "pdf"
+                state["step"] = "WAIT_ITEM"
+                send_message(chat_id, "📄 <b>PDF selected.</b>\n\nNow send the PDF file.")
+
+        elif data == "ultraraw_add_apk":
+            state = USER_STATES.get(chat_id)
+
+            if state and state.get("type") == "ULTRA_RAW":
+                state["selected_type"] = "apk"
+                state["step"] = "WAIT_ITEM"
+                send_message(chat_id, "📱 <b>APK selected.</b>\n\nNow send the APK file.")
+
+        elif data == "ultraraw_add_link":
+            state = USER_STATES.get(chat_id)
+
+            if state and state.get("type") == "ULTRA_RAW":
+                state["selected_type"] = "link"
+                state["step"] = "WAIT_ITEM"
+                send_message(chat_id, "🔗 <b>Link selected.</b>\n\nNow send the HTTP/HTTPS link.")
+
+        elif data == "ultraraw_add_text":
+            state = USER_STATES.get(chat_id)
+
+            if state and state.get("type") == "ULTRA_RAW":
+                state["selected_type"] = "text"
+                state["step"] = "WAIT_ITEM"
+                send_message(chat_id, "📝 <b>Text Prompt selected.</b>\n\nNow send the prompt text.")
+
+        elif data == "ultraraw_add_image":
+            state = USER_STATES.get(chat_id)
+
+            if state and state.get("type") == "ULTRA_RAW":
+                state["selected_type"] = "image"
+                state["step"] = "WAIT_ITEM"
+                send_message(chat_id, "🖼️ <b>Image selected.</b>\n\nNow send the image.")
+
+        elif data == "ultraraw_add_video":
+            state = USER_STATES.get(chat_id)
+
+            if state and state.get("type") == "ULTRA_RAW":
+                state["selected_type"] = "video"
+                state["step"] = "WAIT_ITEM"
+                send_message(chat_id, "🎬 <b>Video selected.</b>\n\nNow send the video.")
+
+        elif data == "ultraraw_add_audio":
+            state = USER_STATES.get(chat_id)
+
+            if state and state.get("type") == "ULTRA_RAW":
+                state["selected_type"] = "audio"
+                state["step"] = "WAIT_ITEM"
+                send_message(chat_id, "🎵 <b>Audio selected.</b>\n\nNow send the audio file.")
+
+        elif data == "ultraraw_add_file":
+            state = USER_STATES.get(chat_id)
+
+            if state and state.get("type") == "ULTRA_RAW":
+                state["selected_type"] = "file"
+                state["step"] = "WAIT_ITEM"
+                send_message(chat_id, "📦 <b>Other File selected.</b>\n\nNow send the document/file.")
+
+        elif data == "ultraraw_custom_yes":
+            state = USER_STATES.get(chat_id)
+
+            if state and state.get("type") == "ULTRA_RAW":
+                state["step"] = "ENTER_CUSTOM"
+                send_message(
+                    chat_id,
+                    "✏️ <b>Enter custom button name:</b>\n\n"
+                    "Example: <code>Download Now</code>"
+                )
+
+        elif data == "ultraraw_custom_no":
+            state = USER_STATES.get(chat_id)
+
+            if state and state.get("type") == "ULTRA_RAW":
+                if state.get("pending_item"):
+                    state["pending_item"]["custom_name"] = None
+                    state["items"].append(state["pending_item"])
+                    state["pending_item"] = None
+
+                state["step"] = "ITEM_MENU"
+
+                keyboard = {
+                    "inline_keyboard": [
+                        [
+                            {"text": "📄 PDF", "callback_data": "ultraraw_add_pdf"},
+                            {"text": "📱 APK", "callback_data": "ultraraw_add_apk"}
+                        ],
+                        [
+                            {"text": "🔗 Link", "callback_data": "ultraraw_add_link"},
+                            {"text": "📝 Text Prompt", "callback_data": "ultraraw_add_text"}
+                        ],
+                        [
+                            {"text": "🖼️ Image", "callback_data": "ultraraw_add_image"},
+                            {"text": "🎬 Video", "callback_data": "ultraraw_add_video"}
+                        ],
+                        [
+                            {"text": "🎵 Audio", "callback_data": "ultraraw_add_audio"},
+                            {"text": "📦 Other File", "callback_data": "ultraraw_add_file"}
+                        ],
+                        [
+                            {"text": "✅ DONE — Publish Post", "callback_data": "ultraraw_done"}
+                        ]
+                    ]
+                }
+
+                send_message(
+                    chat_id,
+                    f"✅ Item added!\n\n"
+                    f"Total items: <b>{len(state['items'])}</b>\n\n"
+                    f"<b>Choose the next item or press DONE:</b>",
+                    keyboard
+                )
+
         elif data == "media_done":
             state = USER_STATES.get(chat_id)
             if state and state.get("type") == "PROMPT" and state.get("step") == "MEDIA":
@@ -284,7 +625,8 @@ def handle_update(update):
                 [{"text": "📱 Publish App", "callback_data": "type_app"}],
                 [{"text": "🎬 Publish Prompt & Media", "callback_data": "type_prompt"}],
                 [{"text": "📁 Publish Raw (Docs & Text Prompts)", "callback_data": "type_raw"}],
-                [{"text": "🔥 Publish Full Prompt Ultra (PDF, Photo, Video, Text & Links)", "callback_data": "type_full_prompt"}]
+                [{"text": "🔥 Publish Full Prompt Ultra (PDF, Photo, Video, Text & Links)", "callback_data": "type_full_prompt"}],
+                [{"text": "⚡ ULTRA RAW MODE (Multi-Item Builder)", "callback_data": "type_ultra_raw"}]
             ]
         }
         send_message(chat_id, "What type of post do you want to create?", keyboard)
@@ -295,6 +637,313 @@ def handle_update(update):
 
     post_type = state.get("type")
     current_step = state.get("step")
+
+    # ============================================================
+    # ULTRA RAW MODE FLOW
+    # ============================================================
+
+    if post_type == "ULTRA_RAW":
+
+        # --------------------------------------------------------
+        # COVER
+        # --------------------------------------------------------
+        if current_step == "COVER":
+
+            if "photo" in message:
+                state["cover"] = message["photo"][-1]["file_id"]
+                state["cover_type"] = "photo"
+
+            elif "video" in message:
+                state["cover"] = message["video"]["file_id"]
+                state["cover_type"] = "video"
+
+            else:
+                send_message(
+                    chat_id,
+                    "⚠️ Please send a valid <b>Photo or Video</b> for the cover."
+                )
+                return
+
+            state["step"] = "CAPTION"
+
+            send_message(
+                chat_id,
+                "Step 2: Send the <b>Caption / Description</b> for the post."
+            )
+
+        # --------------------------------------------------------
+        # CAPTION
+        # --------------------------------------------------------
+        elif current_step == "CAPTION":
+
+            if not text.strip():
+                send_message(
+                    chat_id,
+                    "⚠️ Please send a caption."
+                )
+                return
+
+            state["caption"] = text
+            state["step"] = "ITEM_MENU"
+
+            keyboard = {
+                "inline_keyboard": [
+                    [
+                        {"text": "📄 PDF", "callback_data": "ultraraw_add_pdf"},
+                        {"text": "📱 APK", "callback_data": "ultraraw_add_apk"}
+                    ],
+                    [
+                        {"text": "🔗 Link", "callback_data": "ultraraw_add_link"},
+                        {"text": "📝 Text Prompt", "callback_data": "ultraraw_add_text"}
+                    ],
+                    [
+                        {"text": "🖼️ Image", "callback_data": "ultraraw_add_image"},
+                        {"text": "🎬 Video", "callback_data": "ultraraw_add_video"}
+                    ],
+                    [
+                        {"text": "🎵 Audio", "callback_data": "ultraraw_add_audio"},
+                        {"text": "📦 Other File", "callback_data": "ultraraw_add_file"}
+                    ],
+                    [
+                        {"text": "✅ DONE — Publish Post", "callback_data": "ultraraw_done"}
+                    ]
+                ]
+            }
+
+            send_message(
+                chat_id,
+                "<b>Step 3: Add Items</b>\n\n"
+                "Choose what you want to add.\n"
+                "After every item, you'll get this menu again.",
+                keyboard
+            )
+
+        # --------------------------------------------------------
+        # ITEM MENU
+        # --------------------------------------------------------
+        elif current_step == "ITEM_MENU":
+
+            # Ignore random messages while menu is waiting
+            send_message(
+                chat_id,
+                "👇 Please choose an option from the buttons above."
+            )
+
+        # --------------------------------------------------------
+        # WAITING FOR SELECTED ITEM
+        # --------------------------------------------------------
+        elif current_step == "WAIT_ITEM":
+
+            selected = state.get("selected_type")
+
+            pending = None
+
+            if selected == "pdf":
+                if "document" in message:
+                    doc = message["document"]
+                    name = doc.get("file_name", "PDF")
+                    pending = {
+                        "type": "pdf",
+                        "id": doc["file_id"],
+                        "name": name
+                    }
+                else:
+                    send_message(
+                        chat_id,
+                        "⚠️ Please send the <b>PDF document</b>."
+                    )
+                    return
+
+            elif selected == "apk":
+                if "document" in message:
+                    doc = message["document"]
+                    name = doc.get("file_name", "APK")
+                    pending = {
+                        "type": "apk",
+                        "id": doc["file_id"],
+                        "name": name
+                    }
+                else:
+                    send_message(
+                        chat_id,
+                        "⚠️ Please send the <b>APK file</b>."
+                    )
+                    return
+
+            elif selected == "file":
+                if "document" in message:
+                    doc = message["document"]
+                    name = doc.get("file_name", "File")
+                    pending = {
+                        "type": "file",
+                        "id": doc["file_id"],
+                        "name": name
+                    }
+                else:
+                    send_message(
+                        chat_id,
+                        "⚠️ Please send a <b>Document/File</b>."
+                    )
+                    return
+
+            elif selected == "image":
+                if "photo" in message:
+                    pending = {
+                        "type": "image",
+                        "id": message["photo"][-1]["file_id"]
+                    }
+                else:
+                    send_message(
+                        chat_id,
+                        "⚠️ Please send an <b>Image</b>."
+                    )
+                    return
+
+            elif selected == "video":
+                if "video" in message:
+                    pending = {
+                        "type": "video",
+                        "id": message["video"]["file_id"]
+                    }
+                else:
+                    send_message(
+                        chat_id,
+                        "⚠️ Please send a <b>Video</b>."
+                    )
+                    return
+
+            elif selected == "audio":
+                if "audio" in message:
+                    audio = message["audio"]
+                    pending = {
+                        "type": "audio",
+                        "id": audio["file_id"],
+                        "name": audio.get("file_name", "Audio")
+                    }
+                elif "document" in message:
+                    doc = message["document"]
+                    pending = {
+                        "type": "audio",
+                        "id": doc["file_id"],
+                        "name": doc.get("file_name", "Audio")
+                    }
+                else:
+                    send_message(
+                        chat_id,
+                        "⚠️ Please send an <b>Audio file</b>."
+                    )
+                    return
+
+            elif selected == "link":
+                if text.startswith("http://") or text.startswith("https://"):
+                    pending = {
+                        "type": "link",
+                        "url": text.strip()
+                    }
+                else:
+                    send_message(
+                        chat_id,
+                        "⚠️ Please send a valid link beginning with <b>http://</b> or <b>https://</b>."
+                    )
+                    return
+
+            elif selected == "text":
+                if text.strip():
+                    pending = {
+                        "type": "text",
+                        "text": text
+                    }
+                else:
+                    send_message(
+                        chat_id,
+                        "⚠️ Please send the prompt text."
+                    )
+                    return
+
+            if not pending:
+                send_message(
+                    chat_id,
+                    "⚠️ Invalid item. Please try again."
+                )
+                return
+
+            state["pending_item"] = pending
+            state["step"] = "ASK_CUSTOM"
+
+            keyboard = {
+                "inline_keyboard": [
+                    [
+                        {
+                            "text": "✏️ YES — Custom Name",
+                            "callback_data": "ultraraw_custom_yes"
+                        }
+                    ],
+                    [
+                        {
+                            "text": "❌ NO — Default Name",
+                            "callback_data": "ultraraw_custom_no"
+                        }
+                    ]
+                ]
+            }
+
+            send_message(
+                chat_id,
+                "<b>Item received!</b>\n\n"
+                "Do you want to set a custom button name for this item?",
+                keyboard
+            )
+
+        # --------------------------------------------------------
+        # CUSTOM NAME
+        # --------------------------------------------------------
+        elif current_step == "ENTER_CUSTOM":
+
+            if not text.strip():
+                send_message(
+                    chat_id,
+                    "⚠️ Please enter a button name."
+                )
+                return
+
+            if state.get("pending_item"):
+                state["pending_item"]["custom_name"] = text.strip()
+                state["items"].append(state["pending_item"])
+                state["pending_item"] = None
+
+            state["step"] = "ITEM_MENU"
+
+            keyboard = {
+                "inline_keyboard": [
+                    [
+                        {"text": "📄 PDF", "callback_data": "ultraraw_add_pdf"},
+                        {"text": "📱 APK", "callback_data": "ultraraw_add_apk"}
+                    ],
+                    [
+                        {"text": "🔗 Link", "callback_data": "ultraraw_add_link"},
+                        {"text": "📝 Text Prompt", "callback_data": "ultraraw_add_text"}
+                    ],
+                    [
+                        {"text": "🖼️ Image", "callback_data": "ultraraw_add_image"},
+                        {"text": "🎬 Video", "callback_data": "ultraraw_add_video"}
+                    ],
+                    [
+                        {"text": "🎵 Audio", "callback_data": "ultraraw_add_audio"},
+                        {"text": "📦 Other File", "callback_data": "ultraraw_add_file"}
+                    ],
+                    [
+                        {"text": "✅ DONE — Publish Post", "callback_data": "ultraraw_done"}
+                    ]
+                ]
+            }
+
+            send_message(
+                chat_id,
+                f"✅ <b>Custom name saved:</b> {text.strip()}\n\n"
+                f"Total items: <b>{len(state['items'])}</b>\n\n"
+                f"👇 Add another item or press DONE.",
+                keyboard
+            )
 
     # --- FULL PROMPT ULTRA FLOW ---
     if post_type == "FULL_PROMPT":
